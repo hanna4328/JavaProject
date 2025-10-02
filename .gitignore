@@ -1,1 +1,3 @@
 /bin/
+# Ignore sensitive database credentials
+db.properties
