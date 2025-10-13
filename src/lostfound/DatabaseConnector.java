@@ -11,10 +11,10 @@ public class DatabaseConnector {
     // --- CHANGE THESE VALUES TO YOUR MYSQL CREDENTIALS ---
     private static final String JDBC_URL = "jdbc:mysql://localhost:3306/lostandfound_db";
     private static final String DB_USER = "root"; // <-- CHANGE THIS
-    private static final String DB_PASSWORD = "Monday@123#"; // <-- CHANGE THIS
+    private static final String DB_PASSWORD = "root"; // <-- CHANGE THIS
 
     public static Connection connect() throws SQLException {
-        try {
+        try { 
             Class.forName("com.mysql.cj.jdbc.Driver");
         } catch (ClassNotFoundException e) {
             System.err.println("MySQL JDBC Driver not found.");
@@ -25,7 +25,7 @@ public class DatabaseConnector {
     }
 
     public static boolean validateUser(String username, String password) {
-        String sql = "SELECT * FROM Users WHERE username = ? AND password = ?";
+        String sql = "SELECT * FROM users WHERE username = ? AND password = ?";
         try (Connection conn = connect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             
