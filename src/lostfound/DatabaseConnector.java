@@ -1,205 +1,208 @@
 package lostfound;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import javax.swing.border.EmptyBorder;
-import javax.swing.border.LineBorder;
-import javax.swing.border.TitledBorder;
+import java.sql.Statement;
+import java.util.Properties;
+import java.io.InputStream;
+import java.io.IOException;
 
-public class MyLostReports {
-    
-    private JFrame frame;
+public class DatabaseConnector {
 
-    // A helper class to hold the retrieved Lost Item details (internal use)
-    private static class LostItem {
-        String name;
-        String category;
-        String date;
-        String location;
-        String description;
-    }
+    private static final String JDBC_URL = "jdbc:mysql://localhost:3306/lostandfound_db";
+    private static String DB_USER;
+    private static String DB_PASSWORD;
 
-    public MyLostReports() {
-        frame = new JFrame("My Lost Reports & Matches");
-        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-        frame.setExtendedState(JFrame.MAXIMIZED_BOTH); 
-
-        JPanel mainPanel = createStyledPanel(new BorderLayout(), Theme.BACKGROUND_DARK);
-        mainPanel.setBorder(new EmptyBorder(30, 50, 30, 50));
-        frame.add(mainPanel);
-
-        // --- Header Panel (Title and Back Button) ---
-        JPanel headerPanel = new JPanel(new BorderLayout(20, 0));
-        headerPanel.setOpaque(false);
-        headerPanel.setBorder(new EmptyBorder(0, 0, 30, 0));
-
-        JLabel titleLabel = createStyledLabel("My Lost Reports & Possible Matches");
-        titleLabel.setFont(new Font("Arial", Font.BOLD, 36));
-        titleLabel.setForeground(Theme.ACCENT_PRIMARY);
-        titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        headerPanel.add(titleLabel, BorderLayout.CENTER);
-
-        JButton backButton = createStyledButton("Back to Dashboard");
-        headerPanel.add(backButton, BorderLayout.EAST);
+    static {
+        // Reads credentials from db.properties file
+        Properties prop = new Properties();
         
-        mainPanel.add(headerPanel, BorderLayout.NORTH);
-        
-        // --- Content Panel: JTextArea for Structured Reports ---
-        JTextArea reportDisplay = new JTextArea();
-        // Use Monospaced font for neat alignment of columns
-        reportDisplay.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14)); 
-        reportDisplay.setForeground(Theme.TEXT_LIGHT);
-        reportDisplay.setBackground(Theme.BACKGROUND_DARK);
-        reportDisplay.setEditable(false);
-
-        // Add a titled border for visual structure
-        TitledBorder resultsTitleBorder = BorderFactory.createTitledBorder(
-            new LineBorder(Theme.ACCENT_PRIMARY, 1), 
-            "Report Status and System Matches", TitledBorder.LEFT, TitledBorder.TOP, 
-            new Font(Font.SANS_SERIF, Font.BOLD, 14), Theme.ACCENT_PRIMARY
-        );
-        reportDisplay.setBorder(BorderFactory.createCompoundBorder(resultsTitleBorder, new EmptyBorder(10, 10, 10, 10)));
-        
-        JScrollPane scrollPane = new JScrollPane(reportDisplay);
-        scrollPane.getViewport().setBackground(Theme.BACKGROUND_DARK); 
-        mainPanel.add(scrollPane, BorderLayout.CENTER);
-
-        // --- Load Reports and Matches on Startup ---
-        loadReportsAndMatches(reportDisplay);
-
-        backButton.addActionListener(e -> {
-            frame.dispose();
-            new UserDashboard();
-        });
-
-        frame.setVisible(true);
-    }
-
-    // -------------------------------------------------------------------------
-    // --- CORE LOGIC: Fetch Lost Items and Find Matches ---
-    // -------------------------------------------------------------------------
-
-    private void loadReportsAndMatches(JTextArea reportDisplay) {
-        // NOTE: We assume the logged-in user's ID is 1 for testing purposes.
-        int currentUserId = 1; 
-        
-        StringBuilder output = new StringBuilder();
-        Connection conn = null;
-        
-        try {
-            conn = DatabaseConnector.connect();
-            
-            // 1. Fetch ALL Lost Items reported by the current user
-            String lostSql = "SELECT item_name, category, lost_date, lost_location, description FROM Lost_Items WHERE user_id = ?";
-            try (PreparedStatement lostStmt = conn.prepareStatement(lostSql)) {
-                lostStmt.setInt(1, currentUserId);
-                
-                try (ResultSet lostRs = lostStmt.executeQuery()) {
-                    
-                    if (!lostRs.isBeforeFirst()) { 
-                        reportDisplay.setText("\n\n\tYou have not reported any lost items yet.");
-                        return;
-                    }
-                    
-                    // Header for output section
-                    output.append("=========================================================================================\n");
-                    output.append(String.format("%-25s | %-15s | %-20s\n", "LOST ITEM (Name, Category)", "DATE LOST", "LOCATION"));
-                    output.append("=========================================================================================\n");
-                    
-                    // 2. Loop through each lost item
-                    while (lostRs.next()) {
-                        LostItem lostItem = new LostItem();
-                        lostItem.name = lostRs.getString("item_name");
-                        lostItem.category = lostRs.getString("category");
-                        lostItem.date = lostRs.getString("lost_date");
-                        lostItem.location = lostRs.getString("lost_location");
-                        lostItem.description = lostRs.getString("description");
-                        
-                        // Display Lost Item Details (Main Row)
-                        output.append(String.format("%-25s | %-15s | %-20s\n", 
-                            lostItem.name + " (" + lostItem.category + ")", 
-                            lostItem.date, 
-                            lostItem.location));
-                        output.append("-----------------------------------------------------------------------------------------\n");
-                        
-                        // 3. Perform Auto-Match Query
-                        // The autoMatchFoundItems method opens its own connection and handles its execution
-                        try (ResultSet matchRs = DatabaseConnector.autoMatchFoundItems(lostItem.name, lostItem.category)) {
-                            
-                            if (matchRs.isBeforeFirst()) {
-                                output.append("  [POSSIBLE MATCHES FOUND]\n");
-                                while (matchRs.next()) {
-                                    output.append(String.format("    -> Found: %-25s | Loc: %-15s | Date: %s\n", 
-                                        matchRs.getString("name"), 
-                                        matchRs.getString("foundat"), 
-                                        matchRs.getString("datefound")));
-                                }
-                            } else {
-                                output.append("  (No close matches found yet. Check back later.)\n");
-                            }
-                        } 
-                        
-                        output.append("\n\n"); // Extra space before the next report
-                    }
-                } 
-            } 
-            
-            reportDisplay.setText(output.toString());
-            
-        } catch (SQLException e) {
-            reportDisplay.setText("DATABASE ERROR: Could not retrieve lost reports. Check your database connection and tables.");
-            System.err.println("SQL Error in MyLostReports: " + e.getMessage());
-        } finally {
-            if (conn != null) {
-                try { conn.close(); } catch (SQLException e) { /* ignore */ }
+        try (InputStream input = DatabaseConnector.class.getClassLoader().getResourceAsStream("db.properties")) {
+            if (input == null) {
+                System.err.println("Fatal Error: db.properties file not found. Cannot connect to database.");
+            } else {
+                prop.load(input);
+                DB_USER = prop.getProperty("db.user");
+                DB_PASSWORD = prop.getProperty("db.password");
+                initializeDatabaseTables(); // Initialize tables when credentials are loaded
             }
+        } catch (IOException ex) {
+            System.err.println("Error reading db.properties file: " + ex.getMessage());
         }
     }
 
-    // -------------------------------------------------------------------------
-    // --- STANDARDIZED UI HELPER METHODS (Navy Galaxy Theme) ---
-    // -------------------------------------------------------------------------
-    private JPanel createStyledPanel(LayoutManager layout, Color background) {
-        JPanel panel = new JPanel(layout);
-        panel.setBackground(background);
-        return panel;
+    private static void initializeDatabaseTables() {
+        // This ensures the necessary tables (Users, Lost, Found) exist when the application starts
+        try (Connection conn = connect();
+             Statement stmt = conn.createStatement()) {
+            
+            // 1. Users Table (for login/signup)
+            String createUsersTable = "CREATE TABLE IF NOT EXISTS Users (" +
+                                      "id INT AUTO_INCREMENT PRIMARY KEY," +
+                                      "username VARCHAR(255) NOT NULL UNIQUE," +
+                                      "password VARCHAR(255) NOT NULL" +
+                                      ");";
+            stmt.execute(createUsersTable);
+
+            // 2. Found Items Table (Used by ReportFoundItem.java)
+            String createFoundItemsTable = "CREATE TABLE IF NOT EXISTS founditem (" +
+                                           "id INT AUTO_INCREMENT PRIMARY KEY," +
+                                           "name VARCHAR(255) NOT NULL," +
+                                           "category VARCHAR(100)," + 
+                                           "foundat VARCHAR(255) NOT NULL," +
+                                           "datefound DATE," + 
+                                           "description TEXT," +
+                                           "contactinfo VARCHAR(255)" +
+                                           ");";
+            stmt.execute(createFoundItemsTable);
+
+            // 3. Lost Items Table (Used by ReportLostItem.java)
+            String createLostItemsTable = "CREATE TABLE IF NOT EXISTS Lost_Items (" +
+                                          "id INT AUTO_INCREMENT PRIMARY KEY," +
+                                          "user_id INT NOT NULL," +
+                                          "item_name VARCHAR(255) NOT NULL," +
+                                          "category VARCHAR(100)," +
+                                          "description TEXT," +
+                                          "lost_date DATE," +
+                                          "lost_location VARCHAR(255)," +
+                                          "contact_email VARCHAR(255)," +
+                                          "FOREIGN KEY (user_id) REFERENCES Users(id)" +
+                                          ");";
+            stmt.execute(createLostItemsTable);
+
+            System.out.println("Database tables initialized successfully.");
+
+        } catch (SQLException e) {
+            System.err.println("Error initializing database tables: " + e.getMessage());
+        }
+    }
+
+    public static Connection connect() throws SQLException {
+        // Establishes a new connection to MySQL
+        if (DB_USER == null || DB_PASSWORD == null) {
+            throw new SQLException("Database credentials not loaded. Check db.properties file.");
+        }
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (ClassNotFoundException e) {
+            System.err.println("MySQL JDBC Driver not found. Ensure the Connector/J JAR is in the module path.");
+            throw new SQLException("JDBC Driver not found.");
+        }
+        return DriverManager.getConnection(JDBC_URL, DB_USER, DB_PASSWORD);
+    }
+
+    public static boolean validateUser(String username, String password) {
+        String sql = "SELECT * FROM Users WHERE username = ? AND password = ?";
+        try (Connection conn = connect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            
+            pstmt.setString(1, username);
+            pstmt.setString(2, password);
+            
+            ResultSet rs = pstmt.executeQuery();
+            return rs.next(); // Returns true if user exists
+            
+        } catch (SQLException e) {
+            System.err.println("Error validating user: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public static boolean registerUser(String username, String password) {
+        String sql = "INSERT INTO Users(username, password) VALUES(?, ?)";
+        try (Connection conn = connect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, username);
+            pstmt.setString(2, password);
+            pstmt.executeUpdate();
+            return true;
+            
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1062) {
+                System.err.println("Error: Username already exists.");
+            } else {
+                System.err.println("Error registering user: " + e.getMessage());
+            }
+            return false;
+        }
     }
     
-    private JLabel createStyledLabel(String text) {
-        JLabel label = new JLabel(text);
-        label.setForeground(Theme.TEXT_LIGHT);
-        label.setFont(Theme.FONT_LABEL);
-        return label;
-    }
-
-    private JButton createStyledButton(String text) {
-        JButton button = new JButton(text);
-        // Uses Theme.FONT_BUTTON (Font.PLAIN, 18) for the thinner look
-        button.setFont(Theme.FONT_BUTTON); 
-        button.setBackground(Theme.ACCENT_PRIMARY); 
-        button.setForeground(Theme.BACKGROUND_DARK); 
-        button.setFocusPainted(false);
-        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    /**
+     * AUTO-MATCH LOGIC: Searches the founditem table for matching items.
+     * The calling method (MyLostReports) MUST handle connection closure.
+     */
+    public static ResultSet autoMatchFoundItems(String itemName, String category) throws SQLException {
         
-        button.setBorder(new LineBorder(Theme.BACKGROUND_DARK, 1, true)); 
-
-        button.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                button.setBackground(Theme.ACCENT_SECONDARY);
+        String searchPattern = "%" + itemName.toLowerCase() + "%";
+        
+        String sql = "SELECT name, foundat, datefound, description, contactinfo FROM founditem WHERE " +
+                     "(LOWER(name) LIKE ? OR LOWER(description) LIKE ?) " + 
+                     "AND category = ? " +
+                     "ORDER BY datefound DESC LIMIT 5"; 
+        
+        Connection conn = connect();
+        PreparedStatement pstmt = conn.prepareStatement(sql);
+        
+        pstmt.setString(1, searchPattern);
+        pstmt.setString(2, searchPattern);
+        pstmt.setString(3, category);
+        
+        return pstmt.executeQuery(); 
+    }
+    
+    /**
+     * SEARCH LOGIC: Used by SearchFoundItems to fetch recent or searched items.
+     * The calling method (SearchFoundItems) MUST handle connection closure.
+     */
+    public static ResultSet searchFoundItems(String keyword, String category, Connection conn) throws SQLException {
+        String searchPattern = "%" + keyword + "%";
+        
+        String sql;
+        if (keyword.isEmpty() && category.equals("All Categories")) {
+            sql = "SELECT id, name, category, foundat, datefound, description, contactinfo FROM founditem ORDER BY datefound DESC LIMIT 10";
+        } else {
+            sql = "SELECT id, name, category, foundat, datefound, description, contactinfo FROM founditem WHERE " +
+                  "(name LIKE ? OR description LIKE ?)";
+            if (!category.equals("All Categories")) {
+                sql += " AND category = ?";
             }
+            sql += " ORDER BY datefound DESC";
+        }
 
-            @Override
-            public void mouseExited(MouseEvent e) {
-                button.setBackground(Theme.ACCENT_PRIMARY);
+        PreparedStatement pstmt = conn.prepareStatement(sql);
+        
+        if (!(keyword.isEmpty() && category.equals("All Categories"))) {
+            pstmt.setString(1, searchPattern);
+            pstmt.setString(2, searchPattern);
+            if (!category.equals("All Categories")) {
+                pstmt.setString(3, category);
             }
-        });
-        return button;
+        }
+        
+        return pstmt.executeQuery();
+    }
+    
+    /**
+     * DELETE LOGIC: Deletes a lost item report by its ID.
+     */
+    public static boolean deleteLostItem(int itemId) throws SQLException {
+        String sql = "DELETE FROM Lost_Items WHERE id = ?";
+        
+        try (Connection conn = connect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            
+            pstmt.setInt(1, itemId);
+            int rowsAffected = pstmt.executeUpdate();
+            
+            return rowsAffected > 0;
+            
+        } catch (SQLException e) {
+            System.err.println("Error deleting lost item: " + e.getMessage());
+            throw e;
+        }
     }
 }
