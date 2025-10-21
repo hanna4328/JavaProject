@@ -19,9 +19,8 @@ public class MyLostReports {
     private JTextArea reportDisplay;
     private JTextField deleteIdField;
 
-    // A helper class to hold the retrieved Lost Item details (internal use)
     private static class LostItem {
-        int id; 
+        int id;
         String name;
         String category;
         String date;
@@ -34,12 +33,18 @@ public class MyLostReports {
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.setExtendedState(JFrame.MAXIMIZED_BOTH); 
 
-        // Main panel uses BorderLayout
         JPanel mainPanel = createStyledPanel(new BorderLayout(), Theme.BACKGROUND_DARK);
         mainPanel.setBorder(new EmptyBorder(30, 50, 30, 50));
         frame.add(mainPanel);
 
-        // --- Header Panel (Title and Back Button) ---
+        // --- TOP FIXED CONTAINER (Header + Action Panel) ---
+        // This container holds everything that should NOT scroll (Title, Back Button, and Delete controls).
+        JPanel topFixedContainer = new JPanel();
+        topFixedContainer.setOpaque(false);
+        topFixedContainer.setLayout(new BoxLayout(topFixedContainer, BoxLayout.Y_AXIS));
+
+
+        // --- 1. Header Panel (Title and Back Button) ---
         JPanel headerPanel = new JPanel(new BorderLayout(20, 0));
         headerPanel.setOpaque(false);
         headerPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
@@ -53,9 +58,9 @@ public class MyLostReports {
         JButton backButton = createStyledButton("Back to Dashboard");
         headerPanel.add(backButton, BorderLayout.EAST);
         
-        mainPanel.add(headerPanel, BorderLayout.NORTH);
-
-        // --- Action Panel (Center Top) ---
+        topFixedContainer.add(headerPanel);
+        
+        // --- 2. Delete/Action Panel (Below Header) ---
         JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
         actionPanel.setOpaque(false);
         
@@ -67,8 +72,14 @@ public class MyLostReports {
         actionPanel.add(deleteLabel);
         actionPanel.add(deleteIdField);
         actionPanel.add(deleteButton);
+        
+        topFixedContainer.add(actionPanel);
+        
+        // Place the combined fixed container in the NORTH of the main panel
+        mainPanel.add(topFixedContainer, BorderLayout.NORTH);
 
-        // --- Content Panel: JTextArea for Structured Reports ---
+
+        // --- Scrollable Content Panel (CENTER) ---
         reportDisplay = new JTextArea();
         reportDisplay.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14)); 
         reportDisplay.setForeground(Theme.TEXT_LIGHT);
@@ -77,30 +88,16 @@ public class MyLostReports {
 
         TitledBorder resultsTitleBorder = BorderFactory.createTitledBorder(
             new LineBorder(Theme.ACCENT_PRIMARY, 1), 
-            "Report Status and System Matches", TitledBorder.LEFT, TitledBorder.TOP, 
+            "Report Status and System Matches (NOTE: Use ID to Delete)", TitledBorder.LEFT, TitledBorder.TOP, 
             new Font(Font.SANS_SERIF, Font.BOLD, 14), Theme.ACCENT_PRIMARY
         );
         reportDisplay.setBorder(BorderFactory.createCompoundBorder(resultsTitleBorder, new EmptyBorder(10, 10, 10, 10)));
         
         JScrollPane scrollPane = new JScrollPane(reportDisplay);
         scrollPane.getViewport().setBackground(Theme.BACKGROUND_DARK); 
-
-        // --- FIX: Create a wrapper panel for the action bar and the scroll pane ---
-        // This ensures the action bar stays visible and the reports scroll below it.
-        JPanel contentWrapper = new JPanel();
-        contentWrapper.setLayout(new BoxLayout(contentWrapper, BoxLayout.Y_AXIS));
-        contentWrapper.setOpaque(false);
         
-        // Add Action Panel (Fixed height at the top of the center region)
-        actionPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, actionPanel.getPreferredSize().height));
-        actionPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        contentWrapper.add(actionPanel);
-        
-        // Add Scroll Pane (Fills all remaining vertical space)
-        contentWrapper.add(scrollPane);
-        
-        mainPanel.add(contentWrapper, BorderLayout.CENTER); // Content wrapper goes into CENTER
-        // --- END FIX ---
+        // FIX: Place the scroll pane in the CENTER region to take all available space.
+        mainPanel.add(scrollPane, BorderLayout.CENTER); 
 
 
         // --- Load Reports and Matches on Startup ---
@@ -118,9 +115,15 @@ public class MyLostReports {
     }
     
     // -------------------------------------------------------------------------
-    // --- DELETE ACTION LOGIC ---
+    // --- DELETE ACTION LOGIC (Omitted for brevity, remains the same) ---
     // -------------------------------------------------------------------------
     private void handleDeleteAction() {
+        int currentUserId = SessionManager.getCurrentUserId();
+        if (currentUserId < 0) {
+            JOptionPane.showMessageDialog(frame, "Error: Must be logged in to delete reports.", "Authentication Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
         try {
             int itemId = Integer.parseInt(deleteIdField.getText().trim());
             
@@ -129,12 +132,12 @@ public class MyLostReports {
                 "Confirm Deletion", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             
             if (confirm == JOptionPane.YES_OPTION) {
-                if (DatabaseConnector.deleteLostItem(itemId)) {
+                if (DatabaseConnector.deleteLostItem(itemId, currentUserId)) {
                     JOptionPane.showMessageDialog(frame, "Report ID " + itemId + " deleted successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
                     deleteIdField.setText("");
                     loadReportsAndMatches(reportDisplay); // Refresh the list
                 } else {
-                    JOptionPane.showMessageDialog(frame, "Could not find Report ID " + itemId + ".", "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(frame, "Could not find Report ID " + itemId + " under your account.", "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         } catch (NumberFormatException ex) {
@@ -147,11 +150,16 @@ public class MyLostReports {
 
 
     // -------------------------------------------------------------------------
-    // --- CORE LOGIC: Fetch Lost Items and Find Matches ---
+    // --- CORE LOGIC: Fetch Lost Items and Find Matches (Omitted for brevity) ---
     // -------------------------------------------------------------------------
 
     private void loadReportsAndMatches(JTextArea reportDisplay) {
-        int currentUserId = 1; // Assuming user ID is 1 for testing
+        int currentUserId = SessionManager.getCurrentUserId(); 
+        
+        if (currentUserId < 0) {
+            reportDisplay.setText("ERROR: No active session. Please log in again.");
+            return;
+        }
         
         StringBuilder output = new StringBuilder();
         Connection conn = null;
@@ -159,10 +167,10 @@ public class MyLostReports {
         try {
             conn = DatabaseConnector.connect();
             
-            // 1. Fetch ALL Lost Items (Including ID)
+            // 1. Fetch ALL Lost Items for the current user (SQL is filtered by user_id = ?)
             String lostSql = "SELECT id, item_name, category, lost_date, lost_location, description FROM Lost_Items WHERE user_id = ?";
             try (PreparedStatement lostStmt = conn.prepareStatement(lostSql)) {
-                lostStmt.setInt(1, currentUserId);
+                lostStmt.setInt(1, currentUserId); // Pass session ID here
                 
                 try (ResultSet lostRs = lostStmt.executeQuery()) {
                     
@@ -194,7 +202,7 @@ public class MyLostReports {
                         output.append("----------------------------------------------------------------------------------------------------\n");
                         
                         // 3. Perform Auto-Match Query
-                        try (ResultSet matchRs = DatabaseConnector.autoMatchFoundItems(lostItem.name, lostItem.category)) {
+                        try (ResultSet matchRs = DatabaseConnector.autoMatchFoundItems(lostItem.name, lostItem.category, conn)) {
                             
                             if (matchRs.isBeforeFirst()) {
                                 output.append("  [POSSIBLE MATCHES FOUND]:\n");
@@ -209,7 +217,7 @@ public class MyLostReports {
                             }
                         } 
                         
-                        output.append("\n\n"); // Space before the next report
+                        output.append("\n\n"); 
                     }
                 } 
             } 
