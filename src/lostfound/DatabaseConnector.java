@@ -17,7 +17,6 @@ public class DatabaseConnector {
     private static String DB_PASSWORD;
 
     static {
-        // Reads credentials from db.properties file
         Properties prop = new Properties();
         
         try (InputStream input = DatabaseConnector.class.getClassLoader().getResourceAsStream("db.properties")) {
@@ -27,14 +26,14 @@ public class DatabaseConnector {
                 prop.load(input);
                 DB_USER = prop.getProperty("db.user");
                 DB_PASSWORD = prop.getProperty("db.password");
-                // initializeDatabaseTables() logic should be present here in your code
+                // In a real project, initializeDatabaseTables() would be called here.
             }
         } catch (IOException ex) {
             System.err.println("Error reading db.properties file: " + ex.getMessage());
         }
     }
-
-    // NOTE: initializeDatabaseTables() logic is assumed to be present here in your working code.
+    
+    // NOTE: For stability, the actual initializeDatabaseTables() method must be present in your file.
 
     public static Connection connect() throws SQLException {
         if (DB_USER == null || DB_PASSWORD == null) {
@@ -49,6 +48,9 @@ public class DatabaseConnector {
         return DriverManager.getConnection(JDBC_URL, DB_USER, DB_PASSWORD);
     }
 
+    /**
+     * Authenticates user and returns their ID, or -1 if invalid.
+     */
     public static int validateUser(String username, String password) {
         String sql = "SELECT id FROM Users WHERE username = ? AND password = ?";
         try (Connection conn = connect();
@@ -69,6 +71,9 @@ public class DatabaseConnector {
         }
     }
 
+    /**
+     * Registers a new user account.
+     */
     public static boolean registerUser(String username, String password) {
         String sql = "INSERT INTO Users(username, password) VALUES(?, ?)";
         try (Connection conn = connect();
@@ -90,8 +95,8 @@ public class DatabaseConnector {
     }
     
     /**
-     * AUTO-MATCH LOGIC: Searches the founditem table for matching items.
-     * FIX: Accepts the active connection (conn) to maintain transaction stability.
+     * Auto-Match logic for MyLostReports.java.
+     * Takes active Connection object to ensure stability.
      */
     public static ResultSet autoMatchFoundItems(String itemName, String category, Connection conn) throws SQLException {
         
@@ -102,7 +107,6 @@ public class DatabaseConnector {
                      "AND category = ? " +
                      "ORDER BY datefound DESC LIMIT 5"; 
         
-        // Use the connection passed in the argument
         PreparedStatement pstmt = conn.prepareStatement(sql); 
         
         pstmt.setString(1, searchPattern);
@@ -112,9 +116,10 @@ public class DatabaseConnector {
         return pstmt.executeQuery(); 
     }
     
-    // R: Search logic for SearchFoundItems.java (Assumed to be correct)
+    /**
+     * Search logic for SearchFoundItems.java.
+     */
     public static ResultSet searchFoundItems(String keyword, String category, Connection conn) throws SQLException {
-        // NOTE: Implementation of this method is necessary for your SearchFoundItems.java
         String searchPattern = "%" + keyword + "%";
         
         String sql;
@@ -142,7 +147,20 @@ public class DatabaseConnector {
         return pstmt.executeQuery();
     }
     
-    // D: Delete Lost Item Report
+    /**
+     * Reads a single item by ID for editing.
+     */
+    public static ResultSet getLostItemById(int itemId) throws SQLException {
+        String sql = "SELECT item_name, category, lost_location, lost_date, description, contact_email FROM Lost_Items WHERE id = ?";
+        Connection conn = connect();
+        PreparedStatement pstmt = conn.prepareStatement(sql);
+        pstmt.setInt(1, itemId);
+        return pstmt.executeQuery();
+    }
+    
+    /**
+     * Deletes a lost item report, enforcing user ownership.
+     */
     public static boolean deleteLostItem(int itemId, int userId) throws SQLException {
         String sql = "DELETE FROM Lost_Items WHERE id = ? AND user_id = ?";
         
@@ -161,7 +179,9 @@ public class DatabaseConnector {
         }
     }
     
-    // U: Update Lost Item Report (NOTE: This method is needed for full CRUD)
+    /**
+     * Updates an existing lost item report (U in CRUD).
+     */
     public static boolean updateLostItem(int itemId, String name, String category, String location, String date, String description, String email) throws SQLException {
         String sql = "UPDATE Lost_Items SET " +
                      "item_name = ?, category = ?, lost_location = ?, lost_date = ?, description = ?, contact_email = ? " +
